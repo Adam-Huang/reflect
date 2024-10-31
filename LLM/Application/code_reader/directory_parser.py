@@ -17,54 +17,101 @@ from lib.dataclass import (
     PythonFileStructure, 
     FileDescription, 
     DirectoryDescription, 
-    ProjectDescription
+    ProjectDescription,
+    DefinitionReferences
 )
 from dataclasses import asdict
+
+class ReferenceVisitor(ast.NodeVisitor):
+    """
+    Visit AST nodes to collect definitions and references of classes, functions, and variables.
+    """
+
+    def __init__(self, py_file_structure: PythonFileStructure):
+        self.py_file_structure = py_file_structure
+        self.current_scope = None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        class_name = node.name
+        self.current_scope = class_name
+        if class_name in self.py_file_structure.classes:
+            self.py_file_structure.classes[class_name].references.append(LineRegion(node.lineno, node.end_lineno))        
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        func_name = f"{self.current_scope}.{node.name}" if self.current_scope else node.name
+        if func_name in self.py_file_structure.functions:
+            self.py_file_structure.functions[func_name].references.append(LineRegion(node.lineno, node.end_lineno))
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if isinstance(node.targets[0], ast.Name):
+            var_name = node.targets[0].id
+            if var_name in self.py_file_structure.variables:
+                self.py_file_structure.variables[var_name].definition = LineRegion(node.lineno, node.end_lineno)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        name = node.id
+        if name in self.py_file_structure.classes:
+            self.py_file_structure.classes[name].references.append(LineRegion(node.lineno, node.end_lineno))
+        elif name in self.py_file_structure.functions:
+            self.py_file_structure.functions[name].references.append(LineRegion(node.lineno, node.end_lineno))
+        elif name in self.py_file_structure.variables:
+            self.py_file_structure.variables[name].references.append(LineRegion(node.lineno, node.end_lineno))
+        self.generic_visit(node)
 
 def parse_python_file(file_path: str) -> PythonFileStructure:
     """Parse a Python file to extract its structural information."""
     with open(file_path, 'r', encoding='utf-8') as file:
         content = file.readlines()
 
-    # Initialize the PythonFileStructure object
     py_file_structure = PythonFileStructure(uri=file_path)
+    try:    
+        file_ast = ast.parse(''.join(content), filename=file_path)
+    except Exception as e:
+        print(f"Syntax error in file {file_path}: {e}")
+        return py_file_structure
 
-    # Parse the AST of the file
-    file_ast = ast.parse(''.join(content), filename=file_path)
-
-    # Extract imports, classes, and function definitions
     for node in ast.walk(file_ast):
         if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-            # Collect import line numbers
             py_file_structure.imports.append([node.lineno, node.end_lineno])
-        
+
         elif isinstance(node, ast.FunctionDef):
-            # Collect function information
             func_info = FunctionInfo(
                 name=node.name,
                 definition=LineRegion(start=node.lineno, end=node.end_lineno),
-                description=ast.get_docstring(node) or ""
+                docstring=ast.get_docstring(node) or ""
             )
             py_file_structure.functions[node.name] = func_info
-        
+
         elif isinstance(node, ast.ClassDef):
-            # Collect class information
             class_info = ClassInfo(
                 name=node.name,
                 definition=LineRegion(start=node.lineno, end=node.end_lineno),
-                description=ast.get_docstring(node) or ""
+                docstring=ast.get_docstring(node) or ""
             )
-            # Collect functions within the class
             for item in node.body:
                 if isinstance(item, ast.FunctionDef):
                     method_info = FunctionInfo(
                         name=item.name,
                         definition=LineRegion(start=item.lineno, end=item.end_lineno),
-                        description=ast.get_docstring(item) or ""
+                        docstring=ast.get_docstring(item) or ""
                     )
                     class_info.functions[item.name] = method_info
             py_file_structure.classes[node.name] = class_info
-    
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    var_info = DefinitionReferences(
+                        definition=LineRegion(start=node.lineno, end=node.end_lineno)
+                    )
+                    py_file_structure.variables[target.id] = var_info
+
+    # Use ReferenceVisitor to populate references
+    visitor = ReferenceVisitor(py_file_structure)
+    visitor.visit(file_ast)
+
     return py_file_structure
 
 
@@ -80,6 +127,8 @@ def analyze_directory(directory_path: str) -> ProjectDescription:
         
         # Process all files in current directory
         for file in os.listdir(current_path):
+            if file.startswith('.'):
+                continue
             file_path = os.path.join(current_path, file)
             if os.path.isfile(file_path):
                 relative_file_path = os.path.relpath(file_path, directory_path)
