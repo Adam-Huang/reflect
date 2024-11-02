@@ -123,7 +123,7 @@ def analyze_directory(directory_path: str) -> ProjectDescription:
         if "__pycache__" in relative_dir_path:
             return None
             
-        dir_description = DirectoryDescription(relative_path=relative_dir_path)
+        dir_description = DirectoryDescription(relative_path=relative_dir_path, uri=current_path)
         
         # Process all files in current directory
         for file in os.listdir(current_path):
@@ -156,6 +156,7 @@ def analyze_directory(directory_path: str) -> ProjectDescription:
     root_dir_description = analyze_recursive(directory_path)
     
     project_description = ProjectDescription(
+        uri=directory_path,
         relative_path=root_dir_description.relative_path,
         files=root_dir_description.files,
         subdirectories=root_dir_description.subdirectories,

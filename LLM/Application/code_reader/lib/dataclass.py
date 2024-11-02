@@ -39,11 +39,12 @@ class FunctionInfo(DefinitionReferences, Description):
 @dataclass
 class ClassInfo(FunctionInfo):
     """Represents information about a class, including its functions."""
-    functions: Dict[str, FunctionInfo] = field(default_factory=dict)
+    functions: Dict[str, FunctionInfo] = field(default_factory=dict) # key 是类中包含的函数名
 
 @dataclass
 class PythonFileStructure(Description):
     """Represents the structure of a Python file, including imports, classes, functions, and variables."""
+    goal: str = "" # 读当前文件的目的
     imports: List[List[int]] = field(default_factory=list)
     classes: Dict[str, ClassInfo] = field(default_factory=dict)
     functions: Dict[str, FunctionInfo] = field(default_factory=dict) # key 是函数名
@@ -53,6 +54,7 @@ class PythonFileStructure(Description):
 @dataclass
 class FileDescription(Description):
     """Represents the description of a single file in the project"""
+    goal: str = "" # 读当前文件的目的
     file_type: str = ""
     relative_path: str = ""
     attribution: Dict[str, str] = field(default_factory=dict)
@@ -62,12 +64,13 @@ class FileDescription(Description):
 
 @dataclass
 class DirectoryDescription(Description):
+    goal: str = "" # 读当前文件夹的目的
     relative_path: str = ""
+    priority_order: List[Dict[str, str]] = field(default_factory=list) # 优先级顺序
     files: Dict[str, Union[PythonFileStructure, FileDescription]] = field(default_factory=dict)
     subdirectories: Dict[str, 'DirectoryDescription'] = field(default_factory=dict) # key 是目录名
 
 @dataclass
 class ProjectDescription(DirectoryDescription):
     """Represents the description of an entire project"""
-    iteration_order: List[str] = field(default_factory=list)
     version: str = ""
