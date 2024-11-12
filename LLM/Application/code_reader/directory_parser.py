@@ -136,14 +136,14 @@ def analyze_directory(directory_path: str) -> ProjectDescription:
                     python_file_structure = parse_python_file(file_path)
                     python_file_structure.uri = file_path
                     python_file_structure.relative_path = relative_file_path
-                    dir_description.files[relative_file_path] = python_file_structure
+                    dir_description.files[file] = python_file_structure
                 else:
                     file_structure = FileDescription(
                         uri=file_path,
                         relative_path=relative_file_path,
                         file_type=file.split('.')[-1],
                     )
-                    dir_description.files[relative_file_path] = file_structure
+                    dir_description.files[file] = file_structure
             
             # Recursively process subdirectories
             elif os.path.isdir(file_path):
