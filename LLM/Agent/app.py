@@ -1,19 +1,19 @@
 import streamlit as st
 import openai
-import json
 from datetime import datetime
 import os
 from dotenv import load_dotenv
-import numpy as np
-import faiss
-import pandas as pd
-from typing import List, Dict, Tuple
+from typing import List, Dict
+from .memory import MemoryManager
+
+# 初始化 OpenAI Chat 客户端
+chat_client = openai.OpenAI(
+    base_url=os.getenv("CHAT_BASE_URL"),
+    api_key=os.getenv("CHAT_API_KEY")
+)
 
 # 加载环境变量
 load_dotenv()
-
-# 设置OpenAI API密钥
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # 初始化session state
 if 'messages' not in st.session_state:
@@ -27,66 +27,6 @@ if 'memory_index' not in st.session_state:
 if 'memory_data' not in st.session_state:
     st.session_state.memory_data = []
 
-class MemoryManager:
-    def __init__(self):
-        self.dimension = 1536  # OpenAI ada-002 embedding dimension
-        self.index = faiss.IndexFlatL2(self.dimension)
-        self.memory_data = []
-        self.load_memory()
-
-    def get_embedding(self, text: str) -> np.ndarray:
-        """获取文本的向量嵌入"""
-        response = openai.Embedding.create(
-            input=text,
-            model="text-embedding-ada-002"
-        )
-        return np.array(response['data'][0]['embedding'], dtype=np.float32)
-
-    def add_memory(self, memory_text: str, memory_type: str, timestamp: str):
-        """添加新的记忆"""
-        embedding = self.get_embedding(memory_text)
-        self.index.add(embedding.reshape(1, -1))
-        self.memory_data.append({
-            'text': memory_text,
-            'type': memory_type,
-            'timestamp': timestamp
-        })
-        self.save_memory()
-
-    def search_memory(self, query: str, k: int = 5) -> List[Dict]:
-        """搜索相关记忆"""
-        query_embedding = self.get_embedding(query)
-        distances, indices = self.index.search(query_embedding.reshape(1, -1), k)
-        
-        results = []
-        for idx in indices[0]:
-            if idx != -1 and idx < len(self.memory_data):
-                results.append(self.memory_data[idx])
-        return results
-
-    def save_memory(self):
-        """保存记忆到文件"""
-        memory_state = {
-            'memory_data': self.memory_data,
-            'index_data': faiss.serialize_index(self.index).tobytes()
-        }
-        with open('memory_state.json', 'w') as f:
-            json.dump({
-                'memory_data': self.memory_data,
-                'index_data': memory_state['index_data'].hex()
-            }, f)
-
-    def load_memory(self):
-        """从文件加载记忆"""
-        try:
-            with open('memory_state.json', 'r') as f:
-                data = json.load(f)
-                self.memory_data = data['memory_data']
-                index_bytes = bytes.fromhex(data['index_data'])
-                self.index = faiss.deserialize_index(index_bytes)
-        except FileNotFoundError:
-            self.index = faiss.IndexFlatL2(self.dimension)
-            self.memory_data = []
 
 def get_relevant_memories(query: str) -> List[Dict]:
     """获取与查询相关的记忆"""
@@ -111,7 +51,7 @@ def reflect_on_conversation(conversation_history: List[Dict]) -> str:
     """
     
     try:
-        response = openai.ChatCompletion.create(
+        response = chat_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "你是一个专注于分析和总结的AI助手。"},
@@ -124,9 +64,9 @@ def reflect_on_conversation(conversation_history: List[Dict]) -> str:
         memory_manager = st.session_state.get('memory_manager')
         if memory_manager:
             memory_manager.add_memory(
-                reflection,
-                'reflection',
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                memory_text=reflection,
+                summary='reflection',
+                labels=['reflection']
             )
         
         return reflection
@@ -141,7 +81,7 @@ def chat_with_memory(user_input: str) -> str:
     # 构建记忆上下文
     memory_context = "相关的用户信息：\n"
     for memory in relevant_memories:
-        memory_context += f"- [{memory['timestamp']}] {memory['text']}\n"
+        memory_context += f"- [{memory.created_at}] {memory.original_text}\n"
     
     messages = [
         {"role": "system", "content": f"""你是一个友好的AI助手，请参考以下用户相关信息：
@@ -151,7 +91,7 @@ def chat_with_memory(user_input: str) -> str:
     ]
     
     try:
-        response = openai.ChatCompletion.create(
+        response = chat_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages
         )
@@ -174,7 +114,7 @@ with st.sidebar:
         memories = get_relevant_memories(search_query)
         st.write("相关记忆：")
         for memory in memories:
-            st.write(f"[{memory['timestamp']}] {memory['text']}")
+            st.write(f"[{memory.created_at}] {memory.original_text}")
 
 # 主界面：对话
 user_input = st.text_input("请输入您的消息：")
@@ -215,4 +155,4 @@ st.subheader("系统记忆")
 memory_manager = st.session_state.get('memory_manager')
 if memory_manager:
     for memory in memory_manager.memory_data:
-        st.text(f"[{memory['timestamp']}] {memory['type']}: {memory['text']}")
+        st.text(f"[{memory.created_at}] {memory.labels}: {memory.original_text}")
