@@ -1,0 +1,110 @@
+{
+    "functions": [
+      {
+        "name": "add_memory",
+        "description": "添加新的记忆",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "memory_text": {
+              "type": "string",
+              "description": "记忆的原始文本"
+            },
+            "summary": {
+              "type": "string",
+              "description": "记忆的简短总结"
+            },
+            "labels": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "与记忆关联的标签列表"
+            },
+            "trigger": {
+              "type": "string",
+              "description": "与记忆关联的可选触发词"
+            }
+          },
+          "required": ["memory_text", "summary"]
+        }
+      },
+      {
+        "name": "search_memory",
+        "description": "搜索记忆",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "用于搜索的查询"
+            },
+            "labels": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "搜索记忆时的标签过滤器"
+            },
+            "k": {
+              "type": "integer",
+              "description": "返回的结果数量",
+              "default": 5
+            },
+            "search_type": {
+              "type": "string",
+              "enum": ["vector", "keyword", "label", "trigger"],
+              "description": "搜索的类型"
+            },
+            "exact_match": {
+              "type": "boolean",
+              "description": "是否进行精确匹配",
+              "default": false
+            }
+          },
+          "required": ["query", "search_type"]
+        }
+      },
+      {
+        "name": "update_memory",
+        "description": "更新现有的记忆",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "memory_id": {
+              "type": "string",
+              "description": "要更新的记忆的ID"
+            },
+            "new_text": {
+              "type": "string",
+              "description": "新的文本内容"
+            },
+            "new_summary": {
+              "type": "string",
+              "description": "新的总结"
+            },
+            "new_labels": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "新的标签"
+            },
+            "new_trigger": {
+              "type": "string",
+              "description": "新的触发器"
+            }
+          },
+          "required": ["memory_id"]
+        }
+      },
+      {
+        "name": "delete_memory",
+        "description": "删除记忆",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "memory_id": {
+              "type": "string",
+              "description": "要删除的记忆的ID"
+            }
+          },
+          "required": ["memory_id"]
+        }
+      }
+    ]
+  }
