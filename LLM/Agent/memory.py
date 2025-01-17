@@ -18,6 +18,7 @@ class Memory:
     labels: List[str] = field(default_factory=list)
     trigger: Optional[str] = None
     embedding: Optional[np.ndarray] = None
+    metadata: Optional[dict] = None
 
     def update(self, new_text: str = None, new_summary: str = None):
         """Update memory content and timestamps"""
@@ -50,8 +51,8 @@ class MemoryManager:
 
     def add_memory(self, memory_text: str, summary: str, labels: List[str] = None, trigger: str = None):
         """添加新的记忆"""
-        embedding = self.get_embedding(summary)
-        self.index.add(embedding.reshape(1, -1))
+        embedding = None # self.get_embedding(summary)
+        # self.index.add(embedding.reshape(1, -1))
         
         memory = Memory(
             id=str(len(self.memory_data)),
@@ -80,7 +81,7 @@ class MemoryManager:
             List of matching Memory objects
         """
         if search_type == "vector":
-            query_embedding = self.get_embedding(query)
+            query_embedding = None # self.get_embedding(query)
             distances, indices = self.index.search(query_embedding.reshape(1, -1), k)
             
             results = []
@@ -135,9 +136,9 @@ class MemoryManager:
                     mem.trigger = new_trigger
                     
                 # Update embedding if text changed
-                if new_summary:
-                    new_embedding = self.get_embedding(new_summary)
-                    self.index.add(new_embedding.reshape(1, -1))
+                # if new_summary:
+                #     new_embedding = self.get_embedding(new_summary)
+                #     self.index.add(new_embedding.reshape(1, -1))
                 self.save_memory()
                 return
                 
@@ -174,18 +175,18 @@ class MemoryManager:
                 'embedding': mem.embedding.tolist() if mem.embedding is not None else None
             } for mem in self.memory_data]
         }
-        with open('labels.json', 'w') as f:
+        with open('./data/labels.json', 'w') as f:
             json.dump(list(self.labels), f)
-        with open('triggers.json', 'w') as f:
+        with open('./data/triggers.json', 'w') as f:
             json.dump(list(self.triggers), f)
-        with open('memory_state.json', 'w') as f:
-            json.dump(memory_state, f)
+        with open('./data/memory_state.json', 'w') as f:
+            json.dump(memory_state, f, indent=4, ensure_ascii=False)
         faiss.write_index(self.index, 'index.faiss')
 
     def load_memory(self):
         """从文件加载记忆"""
         try:
-            with open('memory_state.json', 'r') as f:
+            with open('./data/memory_state.json', 'r') as f:
                 data = json.load(f)
                 self.memory_data = [
                     Memory(
@@ -199,14 +200,14 @@ class MemoryManager:
                         embedding=np.array(mem['embedding'], dtype=np.float32) if mem['embedding'] is not None else None
                     ) for mem in data['memory_data']
                 ]
-            self.index = faiss.read_index('index.faiss')
+            self.index = faiss.read_index('./data/index.faiss')
         except FileNotFoundError:
             self.index = faiss.IndexFlatL2(self.dimension)
         
         try:
-            with open('labels.json', 'r') as f:
+            with open('./data/labels.json', 'r') as f:
                 self.labels = set(json.load(f))
-            with open('triggers.json', 'r') as f:
+            with open('./data/triggers.json', 'r') as f:
                 self.triggers = set(json.load(f))
         except FileNotFoundError:
             for mem in self.memory_data:
@@ -233,27 +234,6 @@ def add_memory_dialog():
         st.success("Memory added successfully!")
         st.rerun()
 
-def call_memory_function(memory_manager, function_name, **kwargs):
-    """
-    根据函数名和参数调用 MemoryManager 类中的方法。
-
-    Args:
-        memory_manager (MemoryManager): MemoryManager 的实例
-        function_name (str): 要调用的函数的名称
-        kwargs: 要传递给函数的参数
-
-    Returns:
-        返回调用函数的结果
-    """
-    try:
-        # 获取类中的方法对象
-        func = getattr(memory_manager, function_name)
-        return func(**kwargs)
-    except AttributeError:
-        raise ValueError(f"Function {function_name} not found in MemoryManager")
-    except TypeError as e:
-        raise ValueError(f"Error calling function {function_name}: {e}")
-
 @st.dialog("Show your Memory")
 def show_memory_dialog():
     memory_manager = st.session_state.memory_manager
@@ -274,14 +254,13 @@ def show_memory_dialog():
             memories = memory_manager.search_memory(query, k=k, search_type=search_type, exact_match=exact_match)
             display_memories(memories, memory_manager)
     elif search_type == "label":
-        labels_input = st.text_input("输入标签，多个标签用逗号分隔")
-        labels = [label.strip() for label in labels_input.split(",") if label.strip()]
+        labels = st.multiselect("选择标签", list(memory_manager.labels), default=[])
         k = st.number_input("选择返回结果数量", min_value=1, max_value=100, value=5)
         if st.button("查询"):
             memories = memory_manager.search_memory("", labels=labels, k=k, search_type=search_type)
             display_memories(memories, memory_manager)
     elif search_type == "trigger":
-        query = st.text_input("输入触发词")
+        query = st.selectbox("选择触发词", list(memory_manager.triggers))
         k = st.number_input("选择返回结果数量", min_value=1, max_value=100, value=5)
         if st.button("查询"):
             memories = memory_manager.search_memory(query, k=k, search_type=search_type)
@@ -294,8 +273,10 @@ def display_memories(memories, memory_manager):
         st.write("没有找到匹配的记忆")
         return
     for mem in memories:
-        st.write(f"ID: {mem.id}")
+        st.write(f"ID: {mem.id} | 创建时间: {mem.created_at} | 更新时间: {mem.updated_at}")
         st.write(f"摘要: {mem.summary}")
+        with st.expander("显示原文"):
+            st.markdown(mem.original_text)
         col1, col2 = st.columns(2)
         with col1:
             if st.button(f"删除记忆 {mem.id}"):
