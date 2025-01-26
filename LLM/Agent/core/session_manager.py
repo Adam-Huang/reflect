@@ -43,7 +43,7 @@ class Session:
 
 class LocalSessionManager:
     """ LocalSessionManager，管理本地会话 """
-    def __init__(self, path="./sessions"):
+    def __init__(self, path="./data/sessions"):
         self.root = path
         self.locks = {}
     
@@ -188,7 +188,7 @@ def calc_consultation_period(create_time, today, start_of_week, start_of_month, 
 
 if __name__ == "__main__":
     # 创建会话管理器
-    manager = LocalSessionManager(path="./sessions")
+    manager = LocalSessionManager(path="./data/sessions")
 
     # 创建新的会话，指定session_name
     control_params = {"session_name": "会话1"}

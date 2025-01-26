@@ -35,3 +35,33 @@ def json_exact(text: str) -> dict:
         # Handle JSON decoding errors or other exceptions, return an empty dictionary
         print(f"Error parsing JSON: {e}")
         return {}
+
+def extract_code_snippet(content: str, language: str = "python") -> str:
+    """
+    Extract code snippet from the content.
+    
+    Args:
+        content (str):  Content to extract code snippet from llm response
+        language (str): Language of the code snippet, defaults to "python"
+        
+    Returns:
+        str: The extracted code snippet
+    """
+    
+    if not content:
+        return ""
+        
+    # Try to match code block with specified language
+    pattern = rf'```{language}\s*(.*?)```'
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
+    # If no language-specific block found, try generic code block
+    pattern = r'```\s*(.*?)```'
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
+    # If no code block found, return the original content
+    return content.strip()
