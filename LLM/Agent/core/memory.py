@@ -1,12 +1,29 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 import json
 import numpy as np
 import faiss
 import openai
 import os
 import sqlite3
+
+class Environment:
+    """
+    Short memory for a specific PLAN
+    """
+    def __init__(self):
+        # 内部使用一个字典来存储每个步骤的结果
+        self.store: Dict[str, Any] = {}
+
+    def publish(self, key: str, value: Any):
+        """使用给定的 key 发布数据到 env 中"""
+        self.store[key] = value
+
+    def subscribe(self, key: str) -> Any:
+        """通过 key 获取数据"""
+        value = self.store.get(key, None)
+        return value
 
 @dataclass
 class Memory:
@@ -18,16 +35,15 @@ class Memory:
     labels: List[str] = field(default_factory=list)
     trigger: Optional[str] = None
     embedding: Optional[np.ndarray] = None
-    metadata: Optional[dict] = None
- 
-    def update(self, new_text: str = None, new_summary: str = None):
-        """Update memory content and timestamps"""
-        if new_text:
+    metadata: Optional[dict] = field(default_factory=dict)  # 总为字典
+
+    def update(self, new_text: Optional[str] = None, new_summary: Optional[str] = None):
+        """Update the memory's text and summary"""
+        if new_text is not None:
             self.original_text = new_text
-        if new_summary:
+        if new_summary is not None:
             self.summary = new_summary
         self.updated_at = datetime.now()
-
 
 class MemoryManager:
     def __init__(self):

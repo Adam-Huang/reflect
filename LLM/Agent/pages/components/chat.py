@@ -2,7 +2,8 @@ import os
 import json
 import logging
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Optional, Tuple
+from uuid import UUID, uuid4
 
 import streamlit as st
 from openai import OpenAI
@@ -18,6 +19,29 @@ chat_client = OpenAI(
     base_url=os.getenv("CHAT_BASE_URL"),
     api_key=os.getenv("CHAT_API_KEY")
 )
+
+april_prompt = """
+你是一个诚实、稳健的AI助手，尽力完成用户的要求。
+
+你有很多能力，或者说工具，当你输出
+```json
+{
+    "function_name": "xxx",
+    "parameters": {}
+}
+```
+时，可以调用相关的能力
+
+注意：
+1. 请参考相关记忆
+2. 尽力去完成（不要仅告诉我该怎么做！）。
+  - 如果不清楚用户的要求（缺少信息），请明确提出。
+  - 如果你无法实现（缺少必要物料，如XX信息、YY工具或者ZZ能力），请明确提出。
+
+已知能力有：
+
+
+"""
 
 def get_relevant_memories(query: str) -> List[Memory]:
     """获取与查询相关的记忆
@@ -53,35 +77,24 @@ def fetch_info_from_environment(environment: dict, prompt: str) -> str:
             environment_info += f"{key} result: {value}\n"
     return environment_info
 
-def build_system_prompt_with_memory(query: str, environment: dict) -> (str, str):
+def build_system_prompt_with_memory(query: str, plan: str) -> str:
     """构建系统提示"""
-    workflow_name = ""
-    
-    # 获取相关长期记忆
+    # fetch long-term memories by query
     relevant_memories = get_relevant_memories(query)
-    # 构建记忆上下文
-    memory_context = "\n相关的用户信息：\n"
+    
+    # build relevant memories context
+    memory_context = "\n# 和用户有关的记忆：\n"
     for memory in relevant_memories:
-        memory_context += f"\ncreated at [{memory.created_at}]\nsummary:\n{memory.summary}\n"
-        if "workflow" in memory.labels:
-            workflow_name = memory.trigger
+        memory_context += f"\ncreated at [{memory.created_at}]\nsummary:\n{memory.original_text}\n"
     
-    # 构建短期记忆
-    workflow_overview = "\n".join([
-        f"{step['stage']}:{step['action_name']} -> {step['parameters']}" for step in environment.get("workflow", [])
-        ])
-    environment_info = fetch_info_from_environment(environment, query)
-
-    if workflow_overview:
-        memory_context += f"\n\n当前正在执行的工作流：\n{workflow_overview}\n"
-
-    if environment_info:
-        memory_context += f"\n\n当前涉及的环境信息：\n{environment_info}\n"
+    if plan:
+        memory_context += f"\n\n当前正在执行的计划：\n{plan}\n"
     
-    prompt = "你是一个友好的AI助手，请参考以下用户相关信息：\n" + memory_context + "\n在回答时，适当地运用这些信息来针对性地回答。"
-    return prompt, workflow_name
 
-def chat_with_memory_and_history(user_input: str, system_prompt: str = None) -> str:
+    prompt = april_prompt + memory_context
+    return prompt
+
+def chat_with_conversation(user_input: str, system_prompt: str = "", history: List[Dict] = None) -> str:
     """与用户对话，包含记忆上下文"""
     # 添加用户消息
     with st.chat_message("user"):
@@ -90,15 +103,21 @@ def chat_with_memory_and_history(user_input: str, system_prompt: str = None) -> 
         st.write(user_input)
     
     messages =  [{"role": "system", "content": system_prompt}] + \
-        [{"role": m["role"], "content": m["content"]} for m in st.session_state.quoted_history] + \
+        [{"role": m["role"], "content": m["content"]} for m in history] + \
         [{"role": "user", "content": user_input}]
+    
+    previous_ids = []
+    for m in history:
+        if m["role"] == "assistant":
+            previous_ids.append(m.get("id"))
     
     # 记录对话历史
     st.session_state.session.conversation.append({
         "role": "user",
         "time": str(datetime.now()),
         "content": user_input,
-        "id": str(datetime.now().timestamp())
+        "id": "u_" + str(uuid4()),
+        "previous_ids": previous_ids,
     })
 
     # 生成并显示AI回复
@@ -108,14 +127,25 @@ def chat_with_memory_and_history(user_input: str, system_prompt: str = None) -> 
             messages=messages,
             stream=True,
         )
-        response = st.write_stream(stream)
+        try:
+            reasoning_response = ""
+            if hasattr(stream, "reasoning_content"):
+                reasoning_response += stream.reasoning_content
+                print(stream.reasoning_content, end="")
+            response = st.write_stream(stream)
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            logging.error(f"Chat error: {str(e)}", exc_info=True)
     
     # 添加AI回复到消息记录
     st.session_state.session.conversation.append({
         "role": "assistant",
         "time": str(datetime.now()),
         "content": response,
-        "id": str(datetime.now().timestamp())
+        "id": "a_" + str(uuid4()),
+        "model": {
+            "name": os.getenv("CHAT_MODEL"),
+        }
     })
     
     st.session_state.session_manager.save(st.session_state.session)
@@ -124,90 +154,97 @@ def chat_with_memory_and_history(user_input: str, system_prompt: str = None) -> 
     clear_quotes()
     return response
 
-def llm_call(content: str, environment: dict) -> str:
+def think(content: str, environment: dict) -> str:
     """LLM 调用
     """
-    system_prompt, workflow_name = build_system_prompt_with_memory(content, environment)
-    response = chat_with_memory_and_history(content, system_prompt)
-    return response, workflow_name
+    system_prompt = build_system_prompt_with_memory(content, environment.get("plan", ""))
+    response = chat_with_conversation(content, system_prompt, environment.get("conversation", []))
+    return response
 
-register_function("llm_call", llm_call)
-register_function("user_check", interactive)
-abilities = function_registry
-
-def convert_step_to_function(step: dict, environment: dict) -> dict:
+def execute_action(action: str, environment: dict) -> str:
     """
-    Convert a step in workflow to a function call.
+    Execute action
     
     Args:
-        step (dict): Step in workflow
+        action (str): Action in workflow
         environment (dict): Environment variables
         
     Returns:
         dict: Function call
     """
-    function = step.get("action_name", "")
-    params = step.get("parameters", {}).copy()  # Create a copy to avoid modifying original
-    
-    # Process step dependencies
-    for key, value in params.items():
-        if isinstance(value, str) and value.startswith("STEP"):
-            if value in environment:
-                params[key] = environment[value]
-    
-    # For logging, create a safe copy of params without circular references
-    log_params = params.copy()
-    if function == "llm_call" and "environment" in log_params:
-        log_params["environment"] = "<environment dict>"
-    
-    logging.info(f"Executing {function} with params: {json.dumps(log_params, ensure_ascii=False)}")
-    
-    # Add environment to params for llm_call
-    if function == "llm_call":
-        params["environment"] = environment
-        
-    result = abilities.get(function)(**params)
     try:
-        ret, more = result
-    except (ValueError, TypeError):
-        ret = result
-        more = ""
-    
-    if function != "llm_call":
-        st.markdown(f"Function {function} | more {more} | returned:\n ```json\n{ret}```")
-    return {"result": ret, "more": more}
+        action = json_exact(action)
+    except Exception as e:
+        logging.error(f"Error parsing action: {e}")
+        return f"Error parsing action: {e}"
 
-def do_workflow(workflow: str):
-    """执行工作流"""
-    workflow = json_exact(workflow)
+    function = action.get("action_name", "")
+    params = action.get("parameters", {}).copy()  # Create a copy to avoid modifying original
     
-    for i, step in enumerate(workflow):
-        step.update({"step": f"STEP{i+1}"})
-    
-    environment = {"workflow": workflow}
-    for step in workflow:
-        response = convert_step_to_function(step, environment)
-        # TODO: below, abstractly, is define the next action type to totally task, which is one of the following:
-        # 1. I've finished my task, and you can do the next task.
-        # 2. I need do more operations, to finish my task.
-        # 3. I need more information, to finish my task.
-        # above, is action method or type, which is not data.
-        # So, when we regard llm_call as a function, which real function like get_weather etc, need control the next action type, too.
+    # Add environment to params for think
+    if function == "think":
+        return think(params["content"], environment)
 
-        # OK, now, considering how many action types or methods? 
-        # first, regard April as a employee, when boss gave him a task, he has serveral results:
-        # - Finished or Confusion, which means he will give a feedback to the boss.
-        # - Find something, resource, communication, etc, which is trying to finish the task.
-        # Workflow processing, need to consider these action types.
-        if isinstance(response, dict) and response.get("more"):
-            workflow = response["more"]
-            logging.warning(f"This is {step['action_name']} workflow. Please follow the instructions.")
-            response = do_workflow(response["result"])
-            logging.info(f"Workflow {step['action_name']} completed.")
+    try:
+        result = abilities.get(function)(**params)
+    except Exception as e:
+        logging.error(f"Error executing {function}: {e}")
+        result = f"Error executing {function}: {e}"
+    
+    return result
+
+def run_plan(plan: str) -> str:
+    """执行计划
+    
+    Args:
+        plan (str): 计划
+    Returns:
+        str: 执行的结果
+    """
+    environment = {
+        "plan": plan,
+        "conversation": []
+    }
+    
+    # thinking
+    init_action = "`@plan_decide_next`\n`@function_description`\n开始执行第一步"
+    next_action = think(init_action, environment)
+    environment["conversation"].extend([
+        {"role": "user", "time": str(datetime.now()), "content": init_action, "id": str(datetime.now().timestamp())}, 
+        {"role": "assistant", "time": str(datetime.now()), "content": next_action, "id": str(datetime.now().timestamp())}
+    ])
+
+    while isinstance(next_action, dict) or (isinstance(next_action, str) and "finished" not in next_action.lower()):
+        # action
+        response = execute_action(next_action, environment)
+        # Show as user called the function
+        with st.chat_message("user"):
+            st.markdown(response)
         
-        if isinstance(response, dict):
-            environment.update({step["step"]: response["result"]})
-        else:
-            environment.update({step["step"]: response})
+        # thinking
+        next_action = think(
+            "`@plan_decide_next`\n`@function_description`\n" + f"action_name: {next_action['action_name']}\nparameters: {next_action['parameters']}\nresult: {response}", 
+            environment)
+        # Show as assistant called the function
+        with st.chat_message("assistant"):
+            st.markdown(next_action)
+        
+        environment["conversation"].append({
+            "role": "user",
+            "time": str(datetime.now()),
+            "content": response,
+            "id": str(datetime.now().timestamp())
+        })
+        
+        environment["conversation"].append({
+            "role": "assistant",
+            "time": str(datetime.now()),
+            "content": next_action,
+            "id": str(datetime.now().timestamp())
+        })
 
     return response
+
+register_function("think", think)
+register_function("run_plan", run_plan)
+abilities = function_registry

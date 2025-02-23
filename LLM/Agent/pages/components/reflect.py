@@ -8,10 +8,13 @@ import logging
 import streamlit as st
 from openai import OpenAI
 
+from core.memory import Environment
+from .chat import think, run_plan
+
 # 初始化 OpenAI Chat 客户端
 chat_client = OpenAI(
-    base_url=os.getenv("CHAT_BASE_URL"),
-    api_key=os.getenv("CHAT_API_KEY")
+    base_url=os.getenv("MEM_BASE_URL"),
+    api_key=os.getenv("MEM_API_KEY")
 )
 
 prompt = """从以下对话中提取关键信息，重点关注用户(user)的表述。特别注意以下两点：
@@ -34,17 +37,17 @@ prompt = """从以下对话中提取关键信息，重点关注用户(user)的�
 }}, ... // 其他的总结信息
 ]
 ```
-
-对话历史如下：
-{conversations}
 """
 
-def reflect_on_conversation(conversation_history: List[Dict]) -> str:
+def reflect_on_conversation(conversation_history: List[Dict], prompt: str) -> str:
     """对话反思，分析用户特征和习惯"""
     try:
         logging.info(f"Starting reflection on {len(conversation_history)} conversation items")
+        env = Environment()
+        env.publish("env://conversation_history", conversation_history)
+        
         reflection_stream = chat_client.chat.completions.create(
-            model=os.getenv("CHAT_MODEL"),
+            model=os.getenv("MEM_MODEL"),
             messages=[
                 {"role": "system", "content": "你是一个专注于分析和总结的AI助手。"},
                 {"role": "user", "content": prompt.format(conversations="\n".join([f"{c['role']} - {c['content']}" for c in conversation_history]))},

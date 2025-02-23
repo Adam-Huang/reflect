@@ -3,10 +3,10 @@ import sys
 
 import streamlit as st
 
-from core.memory import MemoryManager
+from pages import init_streamlit
 from pages.components.sidebar import render_sidebar
 from pages.components.history import show_conversation_history
-from pages.components.chat import chat_with_memory_and_history, build_system_prompt_with_memory, do_workflow
+from pages.components.chat import chat_with_conversation, build_system_prompt_with_memory, execute_action
 
 # 设置页面为宽页模式
 st.set_page_config(layout="wide")
@@ -21,12 +21,12 @@ logging.basicConfig(
     ]
 )
 
-# 初始化记忆管理器
-if 'memory_manager' not in st.session_state:
-    st.session_state.memory_manager = MemoryManager()
+init_streamlit()
 
 # 页面标题
 st.title("Retail Assistant Chat")
+st.subheader("Requirement, Research, Plan, Execute")
+st.markdown("---")
 
 # 侧边栏：记忆管理
 with st.sidebar:
@@ -45,14 +45,12 @@ with col2:
     if triggers:
         trigger_str = '\n'.join([f"`{t}`" for t in triggers])
     
-    system_prompt, workflow_name = build_system_prompt_with_memory(trigger_str, {})
+    system_prompt = build_system_prompt_with_memory(trigger_str, "")
     # Because I need know the memory details, so It must write it out
     st.write(system_prompt)
 
 if prompt := st.chat_input("Type something..."):
-    response = chat_with_memory_and_history(trigger_str + prompt, system_prompt)
+    response = chat_with_conversation(trigger_str + prompt, system_prompt, st.session_state.quoted_history)
     
-    if workflow_name != "":
-        logging.warning(f"This is {workflow_name} workflow. Please follow the instructions.")
-        response = do_workflow(response)
-        logging.info(f"Workflow {workflow_name} completed.")
+    if "run_plan" in response.lower():
+        response = execute_action(response, {})

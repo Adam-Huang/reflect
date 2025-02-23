@@ -18,11 +18,9 @@ def render_sidebar():
         select_session_dialog()
     
     st.header("Reflect on Conversation")
-    if st.button("Reflect"):
+    if prompt := st.chat_input("Something should be reflected on..."):
         try:
-            reflection = reflect_on_conversation(st.session_state.quoted_history)
+            reflection = reflect_on_conversation(st.session_state.quoted_history, prompt)
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
             logging.error(f"Reflection error: {str(e)}", exc_info=True)
-    else:
-        st.warning("No conversation history to reflect on.")
